@@ -1,0 +1,36 @@
+[
+  {
+    "adapter_name": "frontier-finance",
+    "adapter_builders": [
+      "Chaoqi (136579807+Chaoqi31@users.noreply.github.com)"
+    ],
+    "original_benchmark": [
+      {
+        "split": "full",
+        "size": 220,
+        "harness": "None",
+        "supported_agents": [
+          "None"
+        ],
+        "adaptable": true,
+        "notes": "Original release ships queries and rubrics plus an LLM-judge grader; responses come from any external system. Judge panel: claude-sonnet-4-6, gemini-3.1-pro-preview, gpt-5.4."
+      }
+    ],
+    "harbor_adapter": [
+      {
+        "split": "full",
+        "adapted_benchmark_size": 220,
+        "parity_benchmark_size": null,
+        "parity_sampling_rate": null,
+        "registry_benchmark_size": 220,
+        "added_agents": [
+          "None"
+        ],
+        "parity_matching_agents": [],
+        "parity_unmatching_agents": null,
+        "parity_costs": null,
+        "notes": "Parity not yet run. Oracle reports are constructed from rubrics; byte-identical oracle reports skip the judges."
+      }
+    ]
+  }
+]
