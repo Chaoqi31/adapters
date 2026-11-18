@@ -120,15 +120,15 @@ Available flags:
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity experiments have not been run yet; the plan (agent, model, subset size, number of runs) will be agreed with the Harbor team first.
+Parity experiments have not been run yet. Upstream ships no agent harness, so the proposed parity agent is Vals AI's [Finance Agent v2](https://github.com/vals-ai/finance-agent-v2) (FA v2), pinned at `3ef5e4a`. It is the open harness behind one of the published FrontierFinance results. FA v2 runs on both sides as a custom agent, and one Harbor-only `claude-code` run shows that the adapter works with a standard CLI agent. The plan is pending agreement with the Harbor team.
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
 |-------|-------|--------|------------------|--------------|------------------------------|----------------------------|
 | TBD | TBD | Macro rubric qualification rate | TBD | TBD | TBD | TBD |
 
 Reproduction (to be completed with the parity runs):
-- **Original side:** run the same agent outside Harbor to produce `system_summaries.json`, then grade it with the official grader at commit `8b71342`: `uv run frontier-finance-grader --config eval.example.yaml`. Compare `macro_avg_qualification_rate_on_all_queries`.
-- **Harbor side:** `harbor run -c src/frontier-finance/run_frontier-finance.yaml -a <agent> -m "<model>"`. The job mean of `reward` is the same macro qualification rate, provided every trial produced a reward; report excluded trials separately.
+- **Original side:** run the same pinned FA v2 CLI outside Harbor, collect its answers into `system_summaries.json`, then grade it with the official grader at commit `8b71342`: `uv run frontier-finance-grader --config eval.example.yaml`. Compare `macro_avg_qualification_rate_on_all_queries`.
+- **Harbor side:** `harbor run -c src/frontier-finance/run_frontier-finance.yaml --agent-import-path <FA v2 wrapper> -m "<model>"`. The job mean of `reward` is the same macro qualification rate, provided every trial produced a reward; report excluded trials separately.
 
 ## Notes & Caveats
 
@@ -146,11 +146,11 @@ Reproduction (to be completed with the parity runs):
 - **Judge errors.** Upstream excludes a query from every metric when all judges fail on it (`judge_error`). In Harbor, the verifier then writes no reward and exits non-zero, so the trial is recorded as a verifier error rather than as a score. A partial judge failure is handled as upstream: the query is graded on the surviving votes. With two surviving judges a tie goes to the first judge in the panel, as upstream. `grading.json` records `judges_voted` and `failed_checks_by_judge`, and the verifier log prints a warning, so parity reports can count queries graded by fewer than three judges.
 - **Missing report.** A missing or empty `/app/report.md` (or a non-file at that path) corresponds to upstream `no_response` and receives reward 0, matching the `..._on_all_queries` metrics.
 - **Trials without a reward.** Harbor's job mean averages only trials that produced a reward. Trials that end in a verifier timeout, an all-judges error, or an agent-side infrastructure error are left out, whereas upstream counts a missing response as 0. The Harbor mean equals the upstream macro metric only when every trial produced a reward, so parity reports list excluded trials.
-- **Prompt adaptation.** Upstream does not define a system prompt for the system under test. The Harbor instruction gives the query, tells the agent to treat `query_date` as "today", and asks for a self-contained Markdown report at `/app/report.md`. The same instruction text will be used on the original side of parity.
+- **Prompt adaptation.** Upstream does not define a system prompt for the system under test. The Harbor instruction gives the query, tells the agent to treat `query_date` as "today", and asks for a self-contained Markdown report at `/app/report.md`. FA v2 has no file tool and answers through its own submit tool, so for FA v2 both sides pass only the query and its date paragraph, and the Harbor wrapper writes the answer to `/app/report.md`.
 - **Cost and time.** Grading calls three judge models in batches of 30 rubrics, so one task can need up to 48 judge calls (475 rubrics). The adapter sets each task's verifier timeout from its rubric count: 360 s per sequential judge call (upstream's 120 s request timeout times three attempts, since `max_retries=2`) plus 600 s, with a 1800 s floor; the largest task gets 17880 s. JSON-parse retries are not budgeted; actual grading time has not been measured yet.
 - **Time-sensitive data.** Queries are anchored to dates from 2024 to 2026. Agents with live web access may see information published after `query_date`, so scores can be optimistic relative to an agent restricted to information available on that date. Both sides of parity share this condition.
 - **Rubrics and grader are out of the agent's reach.** The verifier runs in its own container, and `tests/` (rubrics and oracle copy) is only present there.
-- **Data terms.** The dataset is gated with a "no resharing outside a gated or private repository" condition. Generated tasks contain the rubrics, so where the dataset is published must respect these terms (to be confirmed with the Harbor team; see the PR discussion).
+- **Data terms.** The dataset is gated with a "no resharing outside a gated or private repository" condition. Generated tasks contain the rubrics. Like other gated sources already in `harbor-datasets` with their answers (GPQA-diamond, HLE, GAIA, DeepSynth), the tasks are published there with the terms stated here. Generating the tasks requires accepting the terms on Hugging Face. Do not reshare the rubrics or oracle reports outside Harbor.
 
 ## Installation / Prerequisites
 
