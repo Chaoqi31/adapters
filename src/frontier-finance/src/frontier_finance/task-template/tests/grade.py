@@ -16,7 +16,8 @@ Outcomes, mirroring upstream semantics:
   upstream). No reward is written and the script exits non-zero, so Harbor
   records a verifier error instead of a score (Harbor keys off the missing
   reward file, not the exit code).
-- Report byte-identical to the oracle report -> reward 1 without judge calls.
+- Report byte-identical to the oracle report -> reward 1 without judge calls,
+  unless ``FF_ORACLE_SHORTCUT=0``, which sends the oracle through the judges.
 """
 
 from __future__ import annotations
@@ -73,7 +74,8 @@ def main() -> int:
         return 0
 
     oracle_path = TESTS_DIR / "oracle_report.md"
-    if oracle_path.exists() and REPORT_PATH.read_bytes() == oracle_path.read_bytes():
+    shortcut = os.environ.get("FF_ORACLE_SHORTCUT", "1") != "0"
+    if shortcut and oracle_path.exists() and REPORT_PATH.read_bytes() == oracle_path.read_bytes():
         print("Report is byte-identical to the oracle report; skipping judges.")
         write_result(1.0, {**base, "failed": False, "oracle_shortcut": True, "num_qualified": n})
         return 0
@@ -99,11 +101,19 @@ def main() -> int:
         )
         return 1
 
+    judges_voted = len(judges) - len(result.failed_checks_by_judge)
+    if judges_voted < len(judges):
+        print(
+            f"Warning: only {judges_voted}/{len(judges)} judges voted "
+            f"(failed: {', '.join(result.failed_checks_by_judge)}).",
+            file=sys.stderr,
+        )
     mh = [lbl for rb, lbl in zip(result.rubrics, result.labels, strict=True) if rb.must_have]
     details = {
         **base,
         "failed": False,
         "judge_models": judge_models,
+        "judges_voted": judges_voted,
         "num_qualified": result.num_qualified,
         "qualification_rate": result.num_qualified / n,
         "num_must_have": len(mh),

@@ -16,18 +16,19 @@ FrontierFinance ([blog](https://samaya.ai/blog/frontier-finance), [website](http
 ## Adapter Features
 
 - **Data loading:** downloads `frontier_finance_public.jsonl` from Hugging Face at a pinned revision (requires accepting the dataset terms and `hf auth login` / `HF_TOKEN`), or reads a local copy via `--data-path`.
-- **Stable task IDs:** `frontier-finance-<query_id>`, using the upstream 16-hex `query_id`; task names are `samaya-ai/frontier-finance-<query_id>`.
+- **Stable task IDs:** `frontier-finance-<query_id>`, using the upstream 16-hex `query_id`; task names are `samaya-ai/frontier-finance__<query_id>`.
 - **Unmodified upstream grading:** the Docker image installs the official `frontier-finance` grader at a pinned commit in an isolated virtualenv (`/opt/ff-grader`), using upstream's `uv.lock` so the judge SDK versions (anthropic 0.116.0, google-genai 2.10.0, openai 2.44.0) match upstream. `tests/grade.py` builds the upstream `EvalItem` from the task's rubrics and the agent's report and calls the upstream `Grader` with the judge panel and settings from upstream `eval.example.yaml` (`max_rubrics_per_call=30`, `max_tokens=32000`, `request_timeout=120`, `max_retries=2`, `max_json_parse_retries=1`). Prompts, batching, parsing, and majority voting are the upstream code.
 - **Reward:** `reward` in `/logs/verifier/reward.json` is the task's rubric qualification rate, so over trials that produce a reward the Harbor mean equals upstream `macro_avg_qualification_rate_on_all_queries` (see Notes & Caveats for trials without a reward). Per-rubric judgements and the `must_have` qualification rate are written to `/logs/verifier/grading.json`.
 - **Rubrics hidden from the agent:** rubrics live only in `tests/`, which Harbor copies in after the agent finishes.
-- **Internet access:** the agent needs web access for research (`allow_internet = true`). The verifier calls the Anthropic, Google, and OpenAI APIs.
+- **Internet access:** the agent needs web access for research, set explicitly with `network_mode = "public"` on the agent and the verifier. The verifier calls the Anthropic, Google, and OpenAI APIs.
+- **Separate verifier:** grading runs in a fresh container built from the same image (`[verifier] environment_mode = "separate"`). Only `/app/report.md` is handed over (task-level `artifacts`), so the agent cannot modify the grader. This also lets `harbor regrade` re-grade recorded reports without re-running the agent.
 
 ## Generated Task Structure
 
 ```
 frontier-finance/
 ├── frontier-finance-<query_id>/
-│   ├── task.toml                 # Task config; verifier.env passes the three judge API keys; verifier timeout sized per task
+│   ├── task.toml                 # Task config; separate verifier; verifier.env passes judge keys and optional base URLs; verifier timeout sized per task
 │   ├── instruction.md            # The query, its date, and the output location (/app/report.md)
 │   ├── environment/
 │   │   └── Dockerfile            # python:3.13-slim + pinned upstream grader in /opt/ff-grader
@@ -47,6 +48,7 @@ Adapter code layout:
 src/frontier-finance/
 ├── README.md
 ├── adapter_metadata.json
+├── judge_calibration.py          # Judge-path check: rotate oracle reports across trials, summarize regrades
 ├── parity_experiment.json
 ├── pyproject.toml
 ├── run_frontier-finance.yaml
@@ -130,14 +132,24 @@ Reproduction (to be completed with the parity runs):
 
 ## Notes & Caveats
 
-- **Oracle solutions are constructed.** FrontierFinance ships rubrics but no reference answers. Following the adapter guide ("Benchmarks without oracle solutions"), the adapter builds a reference report from each query's rubrics: each rubric is restated as a finding, and negative constraints ("Does not ...") are omitted because they are satisfied by omission. Because LLM judging is not deterministic, the verifier returns reward 1.0 without calling the judges when `/app/report.md` is byte-identical to the task's oracle report (the same approach as the Harbor GDPval adapter, [harbor-framework/harbor#1384](https://github.com/harbor-framework/harbor/pull/1384)). Any other report goes through the judge panel. The oracle run therefore validates task generation, the environment, and the reward plumbing, but not the judge path; how the constructed reports score under the real judges has not been measured.
-- **Judge errors.** Upstream excludes a query from every metric when all judges fail on it (`judge_error`). In Harbor, the verifier then writes no reward and exits non-zero, so the trial is recorded as a verifier error rather than as a score. A partial judge failure is handled as upstream: the query is graded on the surviving votes. Check `failed_checks_by_judge` in `grading.json` to confirm all three judges voted.
+- **Oracle solutions are constructed.** FrontierFinance ships rubrics but no reference answers. Following the adapter guide ("Benchmarks without oracle solutions"), the adapter builds a reference report from each query's rubrics: each rubric is restated as a finding, and negative constraints ("Does not ...") are omitted because they are satisfied by omission. Because LLM judging is not deterministic, the verifier returns reward 1.0 without calling the judges when `/app/report.md` is byte-identical to the task's oracle report (the same approach as the Harbor GDPval adapter, [harbor-framework/harbor#1384](https://github.com/harbor-framework/harbor/pull/1384)). Any other report goes through the judge panel. CL-bench ([harbor-framework/harbor#728](https://github.com/harbor-framework/harbor/pull/728)) likewise skips its judge for the oracle. The oracle run therefore validates task generation, the environment, and the reward plumbing, but not the judge path.
+- **Judge-path check.** `judge_calibration.py` regrades a recorded oracle job through the real judge panel with `FF_ORACLE_SHORTCUT=0`, in two conditions: each task's own oracle report (positive control) and another task's oracle report (negative control, reports rotated by one). The judges work if the positive control scores high and the negative control scores near 0. The constructed reports are bullet lists, so the 131 "Format & Presentation" rubrics (for example "presents the data in a table") are not expected to pass, and the positive control is not expected to reach 1.0. Results on a fixed 20-task subset (`random.Random(0)`, 840 rubrics, 114 judge calls per condition): pending judge API keys.
+
+  ```bash
+  # from the adapters repo root; the oracle job itself makes no judge calls
+  harbor run -p datasets/frontier-finance -a oracle --job-name calib-oracle-20 -i <task> ...
+  uv run src/frontier-finance/judge_calibration.py swap jobs/calib-oracle-20 jobs/calib-oracle-20-swapped
+  harbor job regrade jobs/calib-oracle-20 -p datasets/frontier-finance --ve FF_ORACLE_SHORTCUT=0 --job-name calib-pos
+  harbor job regrade jobs/calib-oracle-20-swapped -p datasets/frontier-finance --ve FF_ORACLE_SHORTCUT=0 --job-name calib-neg
+  uv run src/frontier-finance/judge_calibration.py summary jobs/calib-pos jobs/calib-neg
+  ```
+- **Judge errors.** Upstream excludes a query from every metric when all judges fail on it (`judge_error`). In Harbor, the verifier then writes no reward and exits non-zero, so the trial is recorded as a verifier error rather than as a score. A partial judge failure is handled as upstream: the query is graded on the surviving votes. With two surviving judges a tie goes to the first judge in the panel, as upstream. `grading.json` records `judges_voted` and `failed_checks_by_judge`, and the verifier log prints a warning, so parity reports can count queries graded by fewer than three judges.
 - **Missing report.** A missing or empty `/app/report.md` (or a non-file at that path) corresponds to upstream `no_response` and receives reward 0, matching the `..._on_all_queries` metrics.
 - **Trials without a reward.** Harbor's job mean averages only trials that produced a reward. Trials that end in a verifier timeout, an all-judges error, or an agent-side infrastructure error are left out, whereas upstream counts a missing response as 0. The Harbor mean equals the upstream macro metric only when every trial produced a reward, so parity reports list excluded trials.
 - **Prompt adaptation.** Upstream does not define a system prompt for the system under test. The Harbor instruction gives the query, tells the agent to treat `query_date` as "today", and asks for a self-contained Markdown report at `/app/report.md`. The same instruction text will be used on the original side of parity.
-- **Cost and time.** Grading calls three judge models in batches of 30 rubrics, so one task can need up to 48 judge calls (475 rubrics). The adapter sets each task's verifier timeout from its rubric count: 120 s (upstream's request timeout) per sequential judge call plus 600 s, with a 1800 s floor; the largest task gets 6360 s. Retries are not budgeted; actual grading time has not been measured yet.
-- **Time-sensitive data.** Queries are anchored to dates from 2024 to 2026. Agents with live web access may see information published after `query_date`.
-- **Shared verifier environment.** The verifier runs in the agent's container (Harbor's default), and the agent runs as root, so an agent could in principle modify `/opt/ff-grader`. `harbor lint` flags this (`shared-verifier`, `root-agent`). The rubrics themselves are not exposed: Harbor copies `tests/` in only after the agent finishes.
+- **Cost and time.** Grading calls three judge models in batches of 30 rubrics, so one task can need up to 48 judge calls (475 rubrics). The adapter sets each task's verifier timeout from its rubric count: 360 s per sequential judge call (upstream's 120 s request timeout times three attempts, since `max_retries=2`) plus 600 s, with a 1800 s floor; the largest task gets 17880 s. JSON-parse retries are not budgeted; actual grading time has not been measured yet.
+- **Time-sensitive data.** Queries are anchored to dates from 2024 to 2026. Agents with live web access may see information published after `query_date`, so scores can be optimistic relative to an agent restricted to information available on that date. Both sides of parity share this condition.
+- **Rubrics and grader are out of the agent's reach.** The verifier runs in its own container, and `tests/` (rubrics and oracle copy) is only present there.
 - **Data terms.** The dataset is gated with a "no resharing outside a gated or private repository" condition. Generated tasks contain the rubrics, so where the dataset is published must respect these terms (to be confirmed with the Harbor team; see the PR discussion).
 
 ## Installation / Prerequisites
@@ -151,12 +163,14 @@ Reproduction (to be completed with the parity runs):
   ```
 - Hugging Face access to the gated dataset (accept the terms, then `hf auth login` or `HF_TOKEN`).
 - Judge API keys for the verifier: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`.
+- Optional: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GOOGLE_GEMINI_BASE_URL` route the judges through a proxy (unset or empty means the provider default).
+- Optional: `FF_ORACLE_SHORTCUT=0` sends the oracle report through the judges instead of returning 1.0 (see the judge-path check). Like `FF_JUDGE_MODELS`, it reaches the verifier only via `--ve`.
 - Optional: `FF_JUDGE_MODELS` (comma-separated) overrides the judge panel for debugging. It reaches the verifier only via `harbor run --ve FF_JUDGE_MODELS=...`. Use the default panel for reported results.
 
 ## Troubleshooting
 
 - **`401` / `GatedRepoError` when generating tasks:** accept the dataset terms on Hugging Face and log in, or pass `--data-path`.
-- **Harbor reports missing environment variables:** export the three judge API keys or pass `--env-file`. For oracle-only runs, placeholder values work.
+- **Harbor reports missing environment variables:** export the three judge API keys or pass `--env-file`. For oracle-only runs, placeholder values work. Use placeholders longer than a few characters: Harbor redacts secret values from collected artifacts, so a key like `x` rewrites every `x` in `report.md` and breaks the oracle shortcut on regrade.
 - **Verifier error with "All judges failed":** check the API keys and provider status; the trial can be retried with `harbor job resume`.
 - **Verifier timeout on very large rubric sets:** increase `--verifier-timeout-multiplier` (or the `[verifier].timeout_sec` value).
 
@@ -176,4 +190,8 @@ Reproduction (to be completed with the parity runs):
 This adapter is developed and maintained by [Chaoqi](https://github.com/Chaoqi31).
 
 **Issues and Contributions:**
-- Submit issues and pull requests to [harbor-framework/adapters](https://github.com/harbor-framework/adapters).
+- Submit issues and pull requests to [harbor-index/adapters](https://github.com/harbor-index/adapters).
+
+## Acknowledgement
+
+API inference compute for running parity tests is generously supported by [2077AI](https://www.2077ai.com/) (https://www.2077ai.com/).

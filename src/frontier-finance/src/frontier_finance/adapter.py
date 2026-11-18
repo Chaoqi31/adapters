@@ -31,11 +31,12 @@ TEMPLATE_DIR = Path(__file__).parent / "task-template"
 TASK_PREFIX = "frontier-finance-"
 
 # Upstream grader settings (eval.example.yaml): three judges, 30 rubrics per call,
-# 120 s request timeout. Calls run sequentially, so the verifier budget is the
-# worst case without retries plus a fixed margin.
+# 120 s request timeout, 2 SDK retries. Calls run sequentially, so the verifier
+# budget is every call timing out on every attempt, plus a fixed margin.
 JUDGE_PANEL_SIZE = 3
 MAX_RUBRICS_PER_CALL = 30
 JUDGE_REQUEST_TIMEOUT_SEC = 120
+JUDGE_ATTEMPTS_PER_CALL = 3
 VERIFIER_MARGIN_SEC = 600
 MIN_VERIFIER_TIMEOUT_SEC = 1800
 
@@ -80,7 +81,8 @@ def task_id_for(query_id: str) -> str:
 def verifier_timeout_sec(num_rubrics: int) -> int:
     """Verifier timeout sized to the number of sequential judge calls."""
     calls = JUDGE_PANEL_SIZE * math.ceil(num_rubrics / MAX_RUBRICS_PER_CALL)
-    return max(MIN_VERIFIER_TIMEOUT_SEC, calls * JUDGE_REQUEST_TIMEOUT_SEC + VERIFIER_MARGIN_SEC)
+    per_call = JUDGE_REQUEST_TIMEOUT_SEC * JUDGE_ATTEMPTS_PER_CALL
+    return max(MIN_VERIFIER_TIMEOUT_SEC, calls * per_call + VERIFIER_MARGIN_SEC)
 
 
 def build_oracle_report(query: dict) -> str:
