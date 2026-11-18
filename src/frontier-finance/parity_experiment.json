@@ -8,7 +8,7 @@
     "parity_benchmark_size": null,
     "number_of_runs": null,
     "notes": null,
-    "original_parity_repo": null,
+    "original_parity_repo": "https://github.com/Chaoqi31/frontier-finance/tree/harbor-parity",
     "adapter_pr": [],
     "dataset_pr": [],
     "parity_pr": [],

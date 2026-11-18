@@ -52,13 +52,10 @@ src/frontier-finance/
 ├── parity_experiment.json
 ├── pyproject.toml
 ├── run_frontier-finance.yaml
-├── run_frontier-finance_parity.yaml   # Harbor side of parity: FA v2 on Daytona
-├── run_original_fa2.py           # Original side of parity: FA v2 outside Harbor; status counts and system_summaries.json export
+├── run_frontier-finance_parity.yaml   # Harbor side of parity: claude-code on Daytona
 └── src/frontier_finance/
     ├── __init__.py
     ├── adapter.py
-    ├── fa2_shared.py             # FA v2 pins and question text, shared by both parity sides
-    ├── finance_agent_v2.py       # Harbor wrapper for FA v2 (BaseInstalledAgent)
     ├── main.py
     └── task-template/
         ├── task.toml
@@ -102,10 +99,6 @@ harbor job resume -p /path/to/jobs/directory
 ```bash
 harbor trial start -p datasets/frontier-finance/<task_id>
 harbor trial start -p datasets/frontier-finance/<task_id> -a <agent_name> -m "<model_name>"
-
-# Finance Agent v2 (the parity agent); FA v2 stops itself after 7200 s
-PYTHONPATH=src/frontier-finance/src harbor trial start -p datasets/frontier-finance/<task_id> \
-    -a frontier_finance.finance_agent_v2:FinanceAgentV2 -m <model-library id> --agent-timeout 7800
 ```
 
 ## Usage: Create Task Directories
@@ -128,32 +121,33 @@ Available flags:
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity experiments have not been run yet. Upstream ships no agent harness, so the proposed parity agent is Vals AI's [Finance Agent v2](https://github.com/vals-ai/finance-agent-v2) (FA v2), pinned at `3ef5e4a`. It is the open harness behind one of the published FrontierFinance results. FA v2 runs on both sides as a custom agent, and one Harbor-only `claude-code` run shows that the adapter works with a standard CLI agent. The plan is pending agreement with the Harbor team.
+Parity experiments have not been run yet. Upstream ships a grader but no agent harness, so this is Scenario 2 of the adapter guide: a fork of the original benchmark adds a runner for a standard Harbor agent, and the same agent runs on both sides. The agent is `claude-code`, as in DeepSynth, Seal-0 and WideSearch, with `claude-haiku-5-5` and a `claude-code` version pinned on both sides when parity starts. Each side runs all 220 queries three times.
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
 |-------|-------|--------|------------------|--------------|------------------------------|----------------------------|
-| TBD | TBD | Macro rubric qualification rate | TBD | TBD | TBD | TBD |
+| claude-code@TBD | claude-haiku-5-5 | Macro rubric qualification rate | 3 | 220 tasks (100%) | TBD | TBD |
 
-Both sides run FA v2 @ `3ef5e4a`, installed from its own `uv.lock`, with the same model, limits, concurrency and question text. The question is the part of `instruction.md` before the report instructions, because FA v2 answers through its own submit tool rather than writing a file. On the Harbor side, `finance_agent_v2.py` writes FA v2's answer to `/app/report.md`.
+Both sides run the same `claude-code` version and model with Harbor's flags (`--print --output-format=stream-json --permission-mode=bypassPermissions`) and environment variables. Both use the same `instruction.md` on stdin, the same 3600 s agent limit from `task.toml`, and the same concurrency. The original side runs each query in a fresh container that mirrors the task image, and `/app/report.md` becomes the query's `system_summary` for the upstream grader.
 
-Reproduction (from the adapters repository root; keys come from the environment):
+- Original parity repository: [Chaoqi31/frontier-finance, branch `harbor-parity`](https://github.com/Chaoqi31/frontier-finance/tree/harbor-parity/harbor_parity), a fork of [samaya-ai/frontier-finance](https://github.com/samaya-ai/frontier-finance) @ `8b71342` that adds `harbor_parity/`
+
+Reproduction (keys come from the environment):
 
 ```bash
-# Original side: run FA v2 outside Harbor, then grade with the upstream CLI at 8b71342
-uv run src/frontier-finance/run_original_fa2.py run -d datasets/frontier-finance -o parity/original/run1 -m <model> -n 8
-uv run src/frontier-finance/run_original_fa2.py collect parity/original/run1 --summaries parity/original/run1/system_summaries.json
-frontier-finance-grader --config eval.example.yaml   # responses_path: the summaries above
+# Original side, from the fork's root: run claude-code outside Harbor, then grade with the upstream CLI
+python harbor_parity/run_claude_code.py run -d <adapters>/datasets/frontier-finance -o runs/original1 \
+    -m <model> --claude-code-version <version> -n 8
+python harbor_parity/run_claude_code.py collect runs/original1 --summaries runs/original1/system_summaries.json
+uv run frontier-finance-grader --config eval.example.yaml   # responses_path: the summaries above
 
-# Harbor side
-PYTHONPATH=src/frontier-finance/src harbor run -y -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
-uv run src/frontier-finance/run_original_fa2.py collect jobs/<job>
+# Harbor side, from the adapters repository root (set model_name and version in the YAML first)
+harbor run -y -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
+python <fork>/harbor_parity/run_claude_code.py collect jobs/<job>
 ```
 
 Compare `macro_avg_qualification_rate_on_all_queries` with the Harbor job mean of `reward`. They are the same metric when every trial produced a reward, so report excluded trials separately.
 
-`collect` counts trials by FA v2 status on either side. `success`, `max_time` and `max_turns` are real results. `error` (a model, quota or tool failure inside FA v2's loop) and a missing `generation.json` are infrastructure failures. Rerunning `run_original_fa2.py run` retries only those. On the Harbor side, the wrapper writes the empty report and exits 3, so the trial is still graded and also shows an agent error. `collect --summaries` on a Harbor job exports its reports for a cross-grade with the upstream CLI.
-
-FA v2 caps its tools' date ranges and its prompt date at 2026-03-01 (`MAX_END_DATE`). The 50 queries dated 2026-04-30 cannot retrieve March–April 2026 data. Both sides share this, so parity is unaffected, but absolute scores are not comparable to results from a date-aware harness.
+`collect` counts runs by the status in claude-code's final `result` event on either side. `success`, `error_max_turns` and `timeout` are real results. An API error or a missing `result` event is an infrastructure failure, and both sides rerun those. `collect --summaries` on a Harbor job exports its reports for a cross-grade with the upstream CLI.
 
 ## Notes & Caveats
 
@@ -171,7 +165,7 @@ FA v2 caps its tools' date ranges and its prompt date at 2026-03-01 (`MAX_END_DA
 - **Judge errors.** Upstream excludes a query from every metric when all judges fail on it (`judge_error`). In Harbor, the verifier then writes no reward and exits non-zero, so the trial is recorded as a verifier error rather than as a score. A partial judge failure is handled as upstream: the query is graded on the surviving votes. With two surviving judges a tie goes to the first judge in the panel, as upstream. `grading.json` records `judges_voted` and `failed_checks_by_judge`, and the verifier log prints a warning, so parity reports can count queries graded by fewer than three judges.
 - **Missing report.** A missing or empty `/app/report.md` (or a non-file at that path) corresponds to upstream `no_response` and receives reward 0, matching the `..._on_all_queries` metrics.
 - **Trials without a reward.** Harbor's job mean averages only trials that produced a reward. Trials that end in a verifier timeout, an all-judges error, or an agent-side infrastructure error are left out, whereas upstream counts a missing response as 0. The Harbor mean equals the upstream macro metric only when every trial produced a reward, so parity reports list excluded trials.
-- **Prompt adaptation.** Upstream does not define a system prompt for the system under test. The Harbor instruction gives the query, tells the agent to treat `query_date` as "today", and asks for a self-contained Markdown report at `/app/report.md`. FA v2 has no file tool and answers through its own submit tool, so for FA v2 both sides pass only the query and its date paragraph, and the Harbor wrapper writes the answer to `/app/report.md`.
+- **Prompt adaptation.** Upstream does not define a system prompt for the system under test. The Harbor instruction gives the query, tells the agent to treat `query_date` as "today", and asks for a self-contained Markdown report at `/app/report.md`. Both parity sides pass this instruction unchanged.
 - **Cost and time.** Grading calls three judge models in batches of 30 rubrics, so one task can need up to 48 judge calls (475 rubrics). The adapter sets each task's verifier timeout from its rubric count: 360 s per sequential judge call (upstream's 120 s request timeout times three attempts, since `max_retries=2`) plus 600 s, with a 1800 s floor; the largest task gets 17880 s. JSON-parse retries are not budgeted; actual grading time has not been measured yet.
 - **Time-sensitive data.** Queries are anchored to dates from 2024 to 2026. Agents with live web access may see information published after `query_date`, so scores can be optimistic relative to an agent restricted to information available on that date. Both sides of parity share this condition.
 - **Rubrics and grader are out of the agent's reach.** The verifier runs in its own container, and `tests/` (rubrics and oracle copy) is only present there.
