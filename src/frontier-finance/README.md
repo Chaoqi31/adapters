@@ -127,7 +127,7 @@ Parity experiments have not been run yet. Upstream ships a grader but no agent h
 |-------|-------|--------|------------------|--------------|------------------------------|----------------------------|
 | claude-code@TBD | claude-haiku-5-5 | Macro rubric qualification rate | 3 | 220 tasks (100%) | TBD | TBD |
 
-Both sides run the same `claude-code` version and model with Harbor's flags (`--print --output-format=stream-json --permission-mode=bypassPermissions`) and environment variables. Both use the same `instruction.md` on stdin, the same 3600 s agent limit from `task.toml`, and the same concurrency. The original side runs each query in a fresh container that mirrors the task image, and `/app/report.md` becomes the query's `system_summary` for the upstream grader.
+Both sides run the same `claude-code` version and model with Harbor's flags (`--verbose --output-format=stream-json --permission-mode=bypassPermissions --print`) and environment variables, including the model aliases Harbor sets for a custom base URL. Host variables that Harbor reads into claude-code's flags or environment (`CLAUDE_CODE_MAX_TURNS`, `CLAUDE_CODE_EFFORT_LEVEL`, `MAX_THINKING_TOKENS`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`, the alias variables) stay unset on both sides; the original-side runner refuses to start if any is set. Both use the same `instruction.md` on stdin, the same 3600 s agent limit and resources from `task.toml`, and the same concurrency. The original side runs each query in a fresh container built from the task's own `environment/Dockerfile` plus Harbor's claude-code install step, and `/app/report.md` becomes the query's `system_summary` for the upstream grader.
 
 - Original parity repository: [Chaoqi31/frontier-finance, branch `harbor-parity`](https://github.com/Chaoqi31/frontier-finance/tree/harbor-parity/harbor_parity), a fork of [samaya-ai/frontier-finance](https://github.com/samaya-ai/frontier-finance) @ `8b71342` that adds `harbor_parity/`
 
@@ -137,17 +137,19 @@ Reproduction (keys come from the environment):
 # Original side, from the fork's root: run claude-code outside Harbor, then grade with the upstream CLI
 python harbor_parity/run_claude_code.py run -d <adapters>/datasets/frontier-finance -o runs/original1 \
     -m <model> --claude-code-version <version> -n 8
-python harbor_parity/run_claude_code.py collect runs/original1 --summaries runs/original1/system_summaries.json
-uv run frontier-finance-grader --config eval.example.yaml   # responses_path: the summaries above
+python harbor_parity/run_claude_code.py collect runs/original1 --summaries runs/original1/summaries/part.json --chunk 20
+# grade each chunk with the upstream CLI and eval.example.yaml (responses_path: the chunk, output_dir: its own)
+uv run frontier-finance-grader --config <chunk config>
+python harbor_parity/run_claude_code.py score runs/original1/grades/*/per_item.json
 
 # Harbor side, from the adapters repository root (set model_name and version in the YAML first)
 harbor run -y -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
-python <fork>/harbor_parity/run_claude_code.py collect jobs/<job>
+python <fork>/harbor_parity/run_claude_code.py collect jobs/<job> [jobs/<rerun job> ...]
 ```
 
-Compare `macro_avg_qualification_rate_on_all_queries` with the Harbor job mean of `reward`. They are the same metric when every trial produced a reward, so report excluded trials separately.
+One rerun rule applies to both sides. `collect` reads each run's status from the final `result` event of claude-code's stream log, the same file on both sides. `success`, `error_max_turns` and `timeout` are results and are scored, 0 without a report. Any other status (an API error, `error_during_execution`, no `result` event) is an infrastructure failure and is rerun: on the original side by repeating the same `run` command, on the Harbor side by a new job over the listed tasks (`collect` prints the `-i` filters), passed to `collect` after the first job. Harbor's own retry stays off (`max_retries` 0, the default), so Harbor's error policy does not rerun or drop trials differently from the original side. `collect` reports the rerun count and, for a Harbor run, the mean reward over trials with a final status, which is the number compared with upstream `macro_avg_qualification_rate_on_all_queries`. `collect --summaries` on a Harbor job exports its reports for a cross-grade with the upstream CLI.
 
-`collect` counts runs by the status in claude-code's final `result` event on either side. `success`, `error_max_turns` and `timeout` are real results. An API error or a missing `result` event is an infrastructure failure, and both sides rerun those. `collect --summaries` on a Harbor job exports its reports for a cross-grade with the upstream CLI.
+Grading follows one rule too. The original side is graded in chunks of 20 queries, so a crash or hang loses one chunk, not the run; per-query rates are independent, so the macro mean is unchanged. A query whose grading lost any judge's votes (`judge_error`, or a non-empty `failed_checks_by_judge`) is regraded on its own: `score` lists these on the original side, and on the Harbor side `grading.json` records `judges_voted` for `harbor job regrade`. Parity reports the number of regraded queries per side.
 
 ## Notes & Caveats
 
@@ -164,7 +166,7 @@ Compare `macro_avg_qualification_rate_on_all_queries` with the Harbor job mean o
   ```
 - **Judge errors.** Upstream excludes a query from every metric when all judges fail on it (`judge_error`). In Harbor, the verifier then writes no reward and exits non-zero, so the trial is recorded as a verifier error rather than as a score. A partial judge failure is handled as upstream: the query is graded on the surviving votes. With two surviving judges a tie goes to the first judge in the panel, as upstream. `grading.json` records `judges_voted` and `failed_checks_by_judge`, and the verifier log prints a warning, so parity reports can count queries graded by fewer than three judges.
 - **Missing report.** A missing or empty `/app/report.md` (or a non-file at that path) corresponds to upstream `no_response` and receives reward 0, matching the `..._on_all_queries` metrics.
-- **Trials without a reward.** Harbor's job mean averages only trials that produced a reward. Trials that end in a verifier timeout, an all-judges error, or an agent-side infrastructure error are left out, whereas upstream counts a missing response as 0. The Harbor mean equals the upstream macro metric only when every trial produced a reward, so parity reports list excluded trials.
+- **Trials without a valid reward.** Harbor's job mean leaves out trials without a reward and trials whose recorded exception marks the reward invalid under Harbor's error policy (for example an API error), whereas upstream counts a missing response as 0. Parity therefore compares the mean reported by `collect`, which applies the rerun rule above to both sides, rather than Harbor's job mean.
 - **Prompt adaptation.** Upstream does not define a system prompt for the system under test. The Harbor instruction gives the query, tells the agent to treat `query_date` as "today", and asks for a self-contained Markdown report at `/app/report.md`. Both parity sides pass this instruction unchanged.
 - **Cost and time.** Grading calls three judge models in batches of 30 rubrics, so one task can need up to 48 judge calls (475 rubrics). The adapter sets each task's verifier timeout from its rubric count: 360 s per sequential judge call (upstream's 120 s request timeout times three attempts, since `max_retries=2`) plus 600 s, with a 1800 s floor; the largest task gets 17880 s. JSON-parse retries are not budgeted; actual grading time has not been measured yet.
 - **Time-sensitive data.** Queries are anchored to dates from 2024 to 2026. Agents with live web access may see information published after `query_date`, so scores can be optimistic relative to an agent restricted to information available on that date. Both sides of parity share this condition.

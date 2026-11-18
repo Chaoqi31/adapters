@@ -6,6 +6,8 @@
 #
 # <keys.env> holds the judge keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
 # optional *_BASE_URL). claude-code uses ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL.
+# Harbor's retry stays off (the default): infrastructure failures are rerun by the
+# rule in run_claude_code.py collect, the same on both sides (see README).
 jobs_dir: jobs
 n_attempts: 1
 timeout_multiplier: 1.0
