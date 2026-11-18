@@ -52,9 +52,13 @@ src/frontier-finance/
 ├── parity_experiment.json
 ├── pyproject.toml
 ├── run_frontier-finance.yaml
+├── run_frontier-finance_parity.yaml   # Harbor side of parity: FA v2 on Daytona
+├── run_original_fa2.py           # Original side of parity: FA v2 outside Harbor; status counts and system_summaries.json export
 └── src/frontier_finance/
     ├── __init__.py
     ├── adapter.py
+    ├── fa2_shared.py             # FA v2 pins and question text, shared by both parity sides
+    ├── finance_agent_v2.py       # Harbor wrapper for FA v2 (BaseInstalledAgent)
     ├── main.py
     └── task-template/
         ├── task.toml
@@ -98,6 +102,10 @@ harbor job resume -p /path/to/jobs/directory
 ```bash
 harbor trial start -p datasets/frontier-finance/<task_id>
 harbor trial start -p datasets/frontier-finance/<task_id> -a <agent_name> -m "<model_name>"
+
+# Finance Agent v2 (the parity agent); FA v2 stops itself after 7200 s
+PYTHONPATH=src/frontier-finance/src harbor trial start -p datasets/frontier-finance/<task_id> \
+    -a frontier_finance.finance_agent_v2:FinanceAgentV2 -m <model-library id> --agent-timeout 7800
 ```
 
 ## Usage: Create Task Directories
@@ -126,9 +134,26 @@ Parity experiments have not been run yet. Upstream ships no agent harness, so th
 |-------|-------|--------|------------------|--------------|------------------------------|----------------------------|
 | TBD | TBD | Macro rubric qualification rate | TBD | TBD | TBD | TBD |
 
-Reproduction (to be completed with the parity runs):
-- **Original side:** run the same pinned FA v2 CLI outside Harbor, collect its answers into `system_summaries.json`, then grade it with the official grader at commit `8b71342`: `uv run frontier-finance-grader --config eval.example.yaml`. Compare `macro_avg_qualification_rate_on_all_queries`.
-- **Harbor side:** `harbor run -c src/frontier-finance/run_frontier-finance.yaml --agent-import-path <FA v2 wrapper> -m "<model>"`. The job mean of `reward` is the same macro qualification rate, provided every trial produced a reward; report excluded trials separately.
+Both sides run FA v2 @ `3ef5e4a`, installed from its own `uv.lock`, with the same model, limits, concurrency and question text. The question is the part of `instruction.md` before the report instructions, because FA v2 answers through its own submit tool rather than writing a file. On the Harbor side, `finance_agent_v2.py` writes FA v2's answer to `/app/report.md`.
+
+Reproduction (from the adapters repository root; keys come from the environment):
+
+```bash
+# Original side: run FA v2 outside Harbor, then grade with the upstream CLI at 8b71342
+uv run src/frontier-finance/run_original_fa2.py run -d datasets/frontier-finance -o parity/original/run1 -m <model> -n 8
+uv run src/frontier-finance/run_original_fa2.py collect parity/original/run1 --summaries parity/original/run1/system_summaries.json
+frontier-finance-grader --config eval.example.yaml   # responses_path: the summaries above
+
+# Harbor side
+PYTHONPATH=src/frontier-finance/src harbor run -y -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
+uv run src/frontier-finance/run_original_fa2.py collect jobs/<job>
+```
+
+Compare `macro_avg_qualification_rate_on_all_queries` with the Harbor job mean of `reward`. They are the same metric when every trial produced a reward, so report excluded trials separately.
+
+`collect` counts trials by FA v2 status on either side. `success`, `max_time` and `max_turns` are real results. `error` (a model, quota or tool failure inside FA v2's loop) and a missing `generation.json` are infrastructure failures. Rerunning `run_original_fa2.py run` retries only those. On the Harbor side, the wrapper writes the empty report and exits 3, so the trial is still graded and also shows an agent error. `collect --summaries` on a Harbor job exports its reports for a cross-grade with the upstream CLI.
+
+FA v2 caps its tools' date ranges and its prompt date at 2026-03-01 (`MAX_END_DATE`). The 50 queries dated 2026-04-30 cannot retrieve March–April 2026 data. Both sides share this, so parity is unaffected, but absolute scores are not comparable to results from a date-aware harness.
 
 ## Notes & Caveats
 

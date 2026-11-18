@@ -1,0 +1,30 @@
+# Harbor side of FrontierFinance parity: Finance Agent v2 (FA v2) as the custom agent.
+# The original side is run_original_fa2.py with the same model and concurrency.
+#
+#   PYTHONPATH=src/frontier-finance/src harbor run -y \
+#       -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
+#
+# <keys.env> holds the judge keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
+# optional *_BASE_URL) and FA v2's keys (its model key or CUSTOM_ENDPOINT +
+# CUSTOM_API_KEY, TAVILY_API_KEY, SEC_EDGAR_API_KEY, PRICING_DATA_API_KEY).
+jobs_dir: jobs
+n_attempts: 1
+timeout_multiplier: 1.0
+orchestrator:
+  type: local
+  # Keep equal to run_original_fa2.py -n: tool rate limits are shared by all running tasks.
+  n_concurrent_trials: 8
+  quiet: false
+environment:
+  type: daytona
+  force_build: false
+  delete: true
+agents:
+  - import_path: frontier_finance.finance_agent_v2:FinanceAgentV2
+    # Set to the agreed parity model (a model-library registry id).
+    model_name: deepseek/deepseek-v4-pro
+    # FA v2 stops itself at 7200 s; this agent-only limit leaves room so its own
+    # limit fires first. The verifier timeout stays as each task sets it.
+    override_timeout_sec: 7800
+datasets:
+  - path: datasets/frontier-finance
