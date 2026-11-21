@@ -40,6 +40,12 @@ def main() -> None:
         default=None,
         help="Local frontier_finance_public.jsonl (default: download from Hugging Face)",
     )
+    parser.add_argument(
+        "--split",
+        choices=("full", "parity"),
+        default="full",
+        help="parity: the 11-query parity subset (5%%, stratified by use case)",
+    )
     args = parser.parse_args()
 
     adapter = FrontierFinanceAdapter(
@@ -48,6 +54,7 @@ def main() -> None:
         limit=args.limit,
         task_ids=args.task_ids,
         data_path=args.data_path,
+        split=args.split,
     )
 
     adapter.run()

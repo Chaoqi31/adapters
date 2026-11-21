@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import re
 import shutil
 import sys
@@ -29,6 +30,10 @@ HF_REVISION = "36afd6dc1cbb2c4512536daf917dc28b1225a720"
 
 TEMPLATE_DIR = Path(__file__).parent / "task-template"
 TASK_PREFIX = "frontier-finance-"
+# Parity subset agreed with the Harbor team: 5% of the 220 queries, stratified by
+# use case (each query has exactly one), sampled with a fixed seed.
+PARITY_SIZE = 11
+PARITY_SEED = 0
 
 # Upstream grader settings (eval.example.yaml): three judges, 30 rubrics per call,
 # 120 s request timeout, 2 SDK retries. Calls run sequentially, so the verifier
@@ -114,6 +119,19 @@ def build_oracle_report(query: dict) -> str:
     return "\n".join(lines)
 
 
+def parity_subset(queries: list[dict]) -> list[dict]:
+    """PARITY_SIZE queries, allocated to use cases by largest remainder, then sampled."""
+    strata: dict[str, list[dict]] = {}
+    for q in sorted(queries, key=lambda q: str(q["query_id"])):
+        strata.setdefault(q["use_cases"][0], []).append(q)
+    quota = {k: PARITY_SIZE * len(v) / len(queries) for k, v in strata.items()}
+    counts = {k: math.floor(v) for k, v in quota.items()}
+    for k in sorted(quota, key=lambda k: (counts[k] - quota[k], k))[: PARITY_SIZE - sum(counts.values())]:
+        counts[k] += 1
+    rng = random.Random(PARITY_SEED)
+    return [q for k in sorted(strata) for q in rng.sample(strata[k], counts[k])]
+
+
 class FrontierFinanceAdapter:
     def __init__(
         self,
@@ -122,15 +140,19 @@ class FrontierFinanceAdapter:
         overwrite: bool = False,
         task_ids: list[str] | None = None,
         data_path: Path | None = None,
+        split: str = "full",
     ):
         self.output_dir = Path(output_dir)
         self.limit = limit
         self.overwrite = overwrite
         self.task_ids = task_ids
         self.data_path = Path(data_path) if data_path else None
+        self.split = split
 
     def _selected(self, queries: list[dict]) -> list[dict]:
         queries = sorted(queries, key=lambda q: str(q["query_id"]))
+        if self.split == "parity":
+            queries = sorted(parity_subset(queries), key=lambda q: str(q["query_id"]))
         if self.task_ids:
             wanted = set(self.task_ids)
             queries = [
