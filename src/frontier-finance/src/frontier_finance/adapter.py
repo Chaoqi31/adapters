@@ -30,7 +30,7 @@ HF_REVISION = "36afd6dc1cbb2c4512536daf917dc28b1225a720"
 
 TEMPLATE_DIR = Path(__file__).parent / "task-template"
 TASK_PREFIX = "frontier-finance-"
-# Parity subset agreed with the Harbor team: 5% of the 220 queries, stratified by
+# Parity subset: 5% of the 220 queries (see the parity plan on the PR), stratified by
 # use case (each query has exactly one), sampled with a fixed seed.
 PARITY_SIZE = 11
 PARITY_SEED = 0
