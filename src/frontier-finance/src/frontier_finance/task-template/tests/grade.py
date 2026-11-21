@@ -1,6 +1,7 @@
 """Grade /app/report.md with the upstream FrontierFinance grader.
 
-Uses the unmodified ``frontier_finance`` package (pinned in the Dockerfile) with
+Uses the upstream ``frontier_finance`` package (pinned in the Dockerfile: upstream
+8b71342 plus one judge-compatibility change in judges.py) with
 the judge panel and settings from upstream ``eval.example.yaml``, which the
 FrontierFinance authors used for their reported numbers.
 
