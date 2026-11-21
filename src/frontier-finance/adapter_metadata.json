@@ -32,8 +32,8 @@
         "parity_unmatching_agents": [
           "None"
         ],
-        "parity_costs": "$12",
-        "notes": "Parity on the 11-task --split parity subset (5%, stratified by use case), 3 runs per side, judged by claude-haiku-5-5, gemini-3.8-flash, gpt-6-luna on both sides. Oracle reports are constructed from rubrics; byte-identical oracle reports skip the judges."
+        "parity_costs": "$22",
+        "notes": "Parity on the 11-task --split parity subset (5%, stratified by use case), 3 runs per side, graded on both sides by the unmodified upstream grader with upstream's judge panel (claude-sonnet-4-6, gemini-3.1-pro-preview, gpt-5.4). Oracle reports are constructed from rubrics; byte-identical oracle reports skip the judges."
       }
     ]
   }

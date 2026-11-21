@@ -19,11 +19,6 @@ environment:
   type: daytona
   force_build: false
   delete: true
-verifier:
-  env:
-    # Parity judge panel, in the same order as judge_models on the original side
-    # (a 1-1 tie goes to the first judge).
-    FF_JUDGE_MODELS: claude-haiku-5-5,gemini-3.8-flash,gpt-6-luna
 agents:
   - name: claude-code
     # The original side uses the same model and version.
