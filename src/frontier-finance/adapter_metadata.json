@@ -32,7 +32,7 @@
         "parity_unmatching_agents": [
           "None"
         ],
-        "parity_costs": "$8",
+        "parity_costs": "$12",
         "notes": "Parity on the 11-task --split parity subset (5%, stratified by use case), 3 runs per side, judged by claude-haiku-5-5, gemini-3.8-flash, gpt-6-luna on both sides. Oracle reports are constructed from rubrics; byte-identical oracle reports skip the judges."
       }
     ]
