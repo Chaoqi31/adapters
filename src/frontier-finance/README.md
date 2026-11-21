@@ -5,7 +5,7 @@
 FrontierFinance evaluates finance AI agents on open-ended, long-form research questions asked by investment professionals: company research, earnings and events, financial data and modeling, sector/industry/macro analysis, coverage and catalyst monitoring, and screening and discovery. Answers are free-form English reports graded against expert-authored rubrics by an LLM judge panel.
 
 - **Size:** 220 queries with 11,543 rubrics (3 to 475 rubrics per query, median 27; 65% marked `must_have`). This adapter converts **all 220 queries into 220 Harbor tasks** (one task per query). No queries are excluded.
-- **Provenance:** [samaya-ai/FrontierFinance](https://huggingface.co/datasets/samaya-ai/FrontierFinance) (Hugging Face dataset, revision `36afd6dc1cbb2c4512536daf917dc28b1225a720`) and the official grader [samaya-ai/frontier-finance](https://github.com/samaya-ai/frontier-finance) (commit `8b71342dc7730eb1803dd3934e17bc71c9922ec5`).
+- **Provenance:** [samaya-ai/FrontierFinance](https://huggingface.co/datasets/samaya-ai/FrontierFinance) (Hugging Face dataset, revision `36afd6dc1cbb2c4512536daf917dc28b1225a720`) and the official grader [samaya-ai/frontier-finance](https://github.com/samaya-ai/frontier-finance) (commit `8b71342dc7730eb1803dd3934e17bc71c9922ec5`), installed from the parity fork's commit [`e287476`](https://github.com/Chaoqi31/frontier-finance/commit/e28747624053c3caca98489db9144c7c9372b34c), which adds one judge-compatibility change.
 - **License:** dataset CC-BY-4.0, grader Apache-2.0. The dataset is gated on Hugging Face; its terms ask users not to reshare it outside a gated or private repository.
 - **Main adaptation:** the original benchmark only grades responses produced by an external system. Here, the query becomes an agent instruction, the agent writes its report to `/app/report.md`, and the verifier runs the unmodified upstream grader on that report.
 
@@ -17,7 +17,7 @@ FrontierFinance ([blog](https://samaya.ai/blog/frontier-finance), [website](http
 
 - **Data loading:** downloads `frontier_finance_public.jsonl` from Hugging Face at a pinned revision (requires accepting the dataset terms and `hf auth login` / `HF_TOKEN`), or reads a local copy via `--data-path`.
 - **Stable task IDs:** `frontier-finance-<query_id>`, using the upstream 16-hex `query_id`; task names are `samaya-ai/frontier-finance__<query_id>`.
-- **Unmodified upstream grading:** the Docker image installs the official `frontier-finance` grader at a pinned commit in an isolated virtualenv (`/opt/ff-grader`), using upstream's `uv.lock` so the judge SDK versions (anthropic 0.116.0, google-genai 2.10.0, openai 2.44.0) match upstream. `tests/grade.py` builds the upstream `EvalItem` from the task's rubrics and the agent's report and calls the upstream `Grader` with the judge panel and settings from upstream `eval.example.yaml` (`max_rubrics_per_call=30`, `max_tokens=32000`, `request_timeout=120`, `max_retries=2`, `max_json_parse_retries=1`). Prompts, batching, parsing, and majority voting are the upstream code.
+- **Upstream grading:** the Docker image installs the `frontier-finance` grader at a pinned commit in an isolated virtualenv (`/opt/ff-grader`), using upstream's `uv.lock` so the judge SDK versions (anthropic 0.116.0, google-genai 2.10.0, openai 2.44.0) match upstream. `tests/grade.py` builds the upstream `EvalItem` from the task's rubrics and the agent's report and calls the upstream `Grader` with the judge panel and settings from upstream `eval.example.yaml` (`max_rubrics_per_call=30`, `max_tokens=32000`, `request_timeout=120`, `max_retries=2`, `max_json_parse_retries=1`). Prompts, batching, parsing, and majority voting are the upstream code. The pinned commit is upstream `8b71342` plus one change in `judges.py`, so that newer judge models accept the grader's requests: no `temperature` for Claude Haiku 5+ and GPT-6+, and `LOW` thinking when a Gemini 3 Flash model rejects `MINIMAL`. Requests to the default panel are unchanged.
 - **Reward:** `reward` in `/logs/verifier/reward.json` is the task's rubric qualification rate, so over trials that produce a reward the Harbor mean equals upstream `macro_avg_qualification_rate_on_all_queries` (see Notes & Caveats for trials without a reward). Per-rubric judgements and the `must_have` qualification rate are written to `/logs/verifier/grading.json`.
 - **Rubrics hidden from the agent:** rubrics live only in `tests/`, which Harbor copies in after the agent finishes.
 - **Internet access:** the agent needs web access for research, set explicitly with `network_mode = "public"` on the agent and the verifier. The verifier calls the Anthropic, Google, and OpenAI APIs.
@@ -110,6 +110,7 @@ hf auth login            # or export HF_TOKEN=...
 cd src/frontier-finance
 uv sync
 uv run frontier-finance --output-dir ../../datasets/frontier-finance
+uv run frontier-finance --split parity --output-dir ../../datasets/frontier-finance-parity  # parity subset
 ```
 
 Available flags:
@@ -118,14 +119,19 @@ Available flags:
 - `--overwrite`: overwrite existing task directories
 - `--task-ids`: only generate these tasks (upstream `query_id` or local task id)
 - `--data-path`: use a local `frontier_finance_public.jsonl` instead of downloading
+- `--split`: `full` (default, all 220 tasks) or `parity` (the 11-task parity subset)
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity experiments have not been run yet. Upstream ships a grader but no agent harness, so this is Scenario 2 of the adapter guide: a fork of the original benchmark adds a runner for a standard Harbor agent, and the same agent runs on both sides. The agent is `claude-code`, as in DeepSynth, Seal-0 and WideSearch, with `claude-haiku-5-5` and a `claude-code` version pinned on both sides when parity starts. Each side runs all 220 queries three times.
+Parity experiments have not been run yet. Upstream ships a grader but no agent harness, so this is Scenario 2 of the adapter guide: a fork of the original benchmark adds a runner for a standard Harbor agent, and the same agent runs on both sides. The agent is `claude-code`, as in DeepSynth, Seal-0 and WideSearch, pinned to version 2.1.330 on both sides, with `claude-haiku-5-5` through the parity gateway. Each side runs the parity subset three times.
+
+**Model and judges.** Parity checks the adaptation, not model ability, so it uses cheap models, as agreed with the Harbor team. The judges are current cheap models from the three upstream judge vendors, in upstream's order: `claude-haiku-5-5`, `gemini-3.8-flash`, `gpt-6-luna` (`FF_JUDGE_MODELS` in `run_frontier-finance_parity.yaml`, `judge_models` in the fork's `harbor_parity/eval.parity.yaml`). The same panel grades both sides, so parity holds; the scores are not comparable with the upstream leaderboard, which uses the full panel. The Claude judge and the agent model share a vendor; any self-preference applies equally to both sides, so it does not affect the parity comparison. The task default stays the upstream panel. The grader carries one compatibility change in `frontier_finance/judges.py` for these newer judges, which the pinned upstream commit predates: no `temperature` for Claude Haiku 5+ and GPT-6+, which reject it, and `LOW` thinking when a Gemini 3 Flash model rejects `MINIMAL`. Prompts, batching, parsing and voting are unchanged, and the upstream panel is sent the same requests as before. Both sides install the grader from the same fork commit.
+
+**Parity subset.** As agreed with the Harbor team, parity runs on 5% of the benchmark: 11 of the 220 queries (`--split parity`). Parity checks that the adaptation is faithful, not model ability, so a small representative subset is enough. Each query has exactly one use case, so the subset is stratified by use case: the 11 slots are allocated in proportion to each use case's share by largest remainder (financial data and modeling 3; company research, earnings and events, sector and macro 2 each; coverage and catalyst monitoring, screening and discovery 1 each), and the queries are drawn with `random.Random(0)` (`parity_subset` in `adapter.py`). The subset has 424 rubrics (6 to 84 per query) and spans query dates from 2024-08 to 2026-04. Its query IDs: `0de600d0386ab53c`, `7dc0e678415f1fd4`, `8d7ee1f40b5244a7`, `9488d3698bafd842`, `a7606d2a0a4bea29`, `bc435f09355f23bc`, `c1d3968daefa7a8e`, `e10acfd0ef14a72c`, `e74672d9b526d701`, `f84db8e5d5d58f43`, `f89b633e396a1d7d`.
 
 | Agent | Model | Metric | Number of Runs | Dataset Size | Original Benchmark Performance | Harbor Adapter Performance |
 |-------|-------|--------|------------------|--------------|------------------------------|----------------------------|
-| claude-code@TBD | claude-haiku-5-5 | Macro rubric qualification rate | 3 | 220 tasks (100%) | TBD | TBD |
+| claude-code@2.1.330 | claude-haiku-5-5 | Macro rubric qualification rate | 3 | 11 tasks (5% of 220) | TBD | TBD |
 
 Both sides run the same `claude-code` version and model with Harbor's flags (`--verbose --output-format=stream-json --permission-mode=bypassPermissions --print`) and environment variables, including the model aliases Harbor sets for a custom base URL. Host variables that Harbor reads into claude-code's flags or environment (`CLAUDE_CODE_MAX_TURNS`, `CLAUDE_CODE_EFFORT_LEVEL`, `MAX_THINKING_TOKENS`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`, the alias variables) stay unset on both sides; the original-side runner refuses to start if any is set. Both use the same `instruction.md` on stdin, the same 3600 s agent limit and resources from `task.toml`, and the same concurrency. The original side runs each query in a fresh container built from the task's own `environment/Dockerfile` plus Harbor's claude-code install step, and `/app/report.md` becomes the query's `system_summary` for the upstream grader.
 
@@ -135,21 +141,22 @@ Reproduction (keys come from the environment):
 
 ```bash
 # Original side, from the fork's root: run claude-code outside Harbor, then grade with the upstream CLI
-python harbor_parity/run_claude_code.py run -d <adapters>/datasets/frontier-finance -o runs/original1 \
-    -m <model> --claude-code-version <version> -n 8
-python harbor_parity/run_claude_code.py collect runs/original1 --summaries runs/original1/summaries/part.json --chunk 20
-# grade each chunk with the upstream CLI and eval.example.yaml (responses_path: the chunk, output_dir: its own)
-uv run frontier-finance-grader --config <chunk config>
-python harbor_parity/run_claude_code.py score runs/original1/grades/*/per_item.json
+python harbor_parity/run_claude_code.py run -d <adapters>/datasets/frontier-finance-parity -o runs/original1 \
+    -m claude-haiku-5-5 --claude-code-version 2.1.330 -n 8 --backend daytona
+python harbor_parity/run_claude_code.py collect runs/original1 --summaries runs/original1/system_summaries.json
+cat <adapters>/datasets/frontier-finance-parity/*/tests/rubrics.jsonl > parity_rubrics.jsonl   # once
+uv run frontier-finance-grader --config harbor_parity/eval.parity.yaml \
+    --responses runs/original1/system_summaries.json --output-dir runs/original1/grades
+python harbor_parity/run_claude_code.py score runs/original1/grades/per_item.json [<regrade>/per_item.json ...]
 
-# Harbor side, from the adapters repository root (set model_name and version in the YAML first)
+# Harbor side, from the adapters repository root, after generating datasets/frontier-finance-parity
 harbor run -y -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
 python <fork>/harbor_parity/run_claude_code.py collect jobs/<job> [jobs/<rerun job> ...]
 ```
 
 One rerun rule applies to both sides. `collect` reads each run's status from the final `result` event of claude-code's stream log, the same file on both sides. `success`, `error_max_turns` and `timeout` are results and are scored, 0 without a report. Any other status (an API error, `error_during_execution`, no `result` event) is an infrastructure failure and is rerun: on the original side by repeating the same `run` command, on the Harbor side by a new job over the listed tasks (`collect` prints the `-i` filters), passed to `collect` after the first job. Harbor's own retry stays off (`max_retries` 0, the default), so Harbor's error policy does not rerun or drop trials differently from the original side. `collect` reports the rerun count and, for a Harbor run, the mean reward over trials with a final status, which is the number compared with upstream `macro_avg_qualification_rate_on_all_queries`. `collect --summaries` on a Harbor job exports its reports for a cross-grade with the upstream CLI.
 
-Grading follows one rule too. The original side is graded in chunks of 20 queries, so a crash or hang loses one chunk, not the run; per-query rates are independent, so the macro mean is unchanged. A query whose grading lost any judge's votes (`judge_error`, or a non-empty `failed_checks_by_judge`) is regraded on its own: `score` lists these on the original side, and on the Harbor side `grading.json` records `judges_voted` for `harbor job regrade`. Parity reports the number of regraded queries per side.
+Grading follows one rule too. A query whose grading lost any judge's votes (`judge_error`, or a non-empty `failed_checks_by_judge`) is regraded on its own: `score` lists these on the original side, and `collect` lists them on the Harbor side (from each trial's `grading.json`) and leaves them out of the mean until `harbor job regrade` replaces them. Parity reports the number of regraded queries per side.
 
 ## Notes & Caveats
 
@@ -184,9 +191,9 @@ Grading follows one rule too. The original side is graded in chunks of 20 querie
   ```
 - Hugging Face access to the gated dataset (accept the terms, then `hf auth login` or `HF_TOKEN`).
 - Judge API keys for the verifier: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`.
-- Optional: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GOOGLE_GEMINI_BASE_URL` route the judges through a proxy (unset or empty means the provider default).
+- Optional: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GOOGLE_GEMINI_BASE_URL` route the judges through a proxy (unset or empty means the provider default). For the parity gateway they are `https://app.ppapi.ai`, `https://app.ppapi.ai/v1` and `https://app.ppapi.ai`.
 - Optional: `FF_ORACLE_SHORTCUT=0` sends the oracle report through the judges instead of returning 1.0 (see the judge-path check). Like `FF_JUDGE_MODELS`, it reaches the verifier only via `--ve`.
-- Optional: `FF_JUDGE_MODELS` (comma-separated) overrides the judge panel for debugging. It reaches the verifier only via `harbor run --ve FF_JUDGE_MODELS=...`. Use the default panel for reported results.
+- Optional: `FF_JUDGE_MODELS` (comma-separated) overrides the judge panel. It reaches the verifier via `harbor run --ve FF_JUDGE_MODELS=...` or a job config's `verifier.env`; `run_frontier-finance_parity.yaml` sets the parity panel this way.
 
 ## Troubleshooting
 

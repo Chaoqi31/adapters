@@ -1,15 +1,17 @@
 [
   {
     "adapter_name": "frontier-finance",
-    "agent": "<agent>@<version>",
-    "model": "<model>",
+    "agent": "claude-code@2.1.330",
+    "model": "claude-haiku-5-5",
     "date": "YYYY-MM-DD",
-    "adapted_benchmark_size": null,
-    "parity_benchmark_size": null,
-    "number_of_runs": null,
-    "notes": null,
+    "adapted_benchmark_size": 220,
+    "parity_benchmark_size": 11,
+    "number_of_runs": 3,
+    "notes": "Parity on the 11-task subset (5%, stratified by use case, --split parity), agreed with the Harbor team. Both sides are graded by the same cheap judge panel (claude-haiku-5-5, gemini-3.8-flash, gpt-6-luna); scores are not comparable with the upstream leaderboard.",
     "original_parity_repo": "https://github.com/Chaoqi31/frontier-finance/tree/harbor-parity",
-    "adapter_pr": [],
+    "adapter_pr": [
+      "https://github.com/harbor-index/adapters/pull/16"
+    ],
     "dataset_pr": [],
     "parity_pr": [],
     "metrics": [

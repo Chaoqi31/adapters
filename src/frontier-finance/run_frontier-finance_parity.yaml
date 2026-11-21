@@ -4,8 +4,9 @@
 #
 #   harbor run -y -c src/frontier-finance/run_frontier-finance_parity.yaml --env-file <keys.env>
 #
-# <keys.env> holds the judge keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY,
-# optional *_BASE_URL). claude-code uses ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL.
+# <keys.env> holds the judge keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)
+# and the parity gateway's ANTHROPIC_BASE_URL, OPENAI_BASE_URL and GOOGLE_GEMINI_BASE_URL.
+# claude-code uses ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL.
 # Harbor's retry stays off (the default): infrastructure failures are rerun by the
 # rule in run_claude_code.py collect, the same on both sides (see README).
 jobs_dir: jobs
@@ -20,11 +21,17 @@ environment:
   type: daytona
   force_build: false
   delete: true
+verifier:
+  env:
+    # Parity judge panel, in the same order as judge_models on the original side
+    # (a 1-1 tie goes to the first judge).
+    FF_JUDGE_MODELS: claude-haiku-5-5,gemini-3.8-flash,gpt-6-luna
 agents:
   - name: claude-code
-    # Set both to the agreed parity model and version; the original side uses the same.
+    # The original side uses the same model and version.
     model_name: anthropic/claude-haiku-5-5
     kwargs:
-      version: "2.1.326"
+      version: "2.1.330"
 datasets:
-  - path: datasets/frontier-finance
+  # uv run frontier-finance --split parity --output-dir ../../datasets/frontier-finance-parity
+  - path: datasets/frontier-finance-parity
