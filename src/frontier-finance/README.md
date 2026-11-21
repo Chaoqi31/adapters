@@ -123,7 +123,7 @@ Available flags:
 
 ## Comparison with Original Benchmark (Parity)
 
-Parity experiments have not been run yet. Upstream ships a grader but no agent harness, so this is Scenario 2 of the adapter guide: a fork of the original benchmark adds a runner for a standard Harbor agent, and the same agent runs on both sides. The agent is `claude-code`, as in DeepSynth, Seal-0 and WideSearch, pinned to version 2.1.330 on both sides, with `claude-haiku-5-5` through the parity gateway. Each side runs the parity subset three times.
+Parity is in progress: the 5-query sanity run is done on both sides, and the scores go in the table once three runs per side are done. Upstream ships a grader but no agent harness, so this is Scenario 2 of the adapter guide: a fork of the original benchmark adds a runner for a standard Harbor agent, and the same agent runs on both sides. The agent is `claude-code`, as in DeepSynth, Seal-0 and WideSearch, pinned to version 2.1.330 on both sides, with `claude-haiku-5-5` through the parity gateway. Each side runs the parity subset three times.
 
 **Model and judges.** Parity checks the adaptation, not model ability, so it uses cheap models, as agreed with the Harbor team. The judges are current cheap models from the three upstream judge vendors, in upstream's order: `claude-haiku-5-5`, `gemini-3.8-flash`, `gpt-6-luna` (`FF_JUDGE_MODELS` in `run_frontier-finance_parity.yaml`, `judge_models` in the fork's `harbor_parity/eval.parity.yaml`). The same panel grades both sides, so parity holds; the scores are not comparable with the upstream leaderboard, which uses the full panel. The Claude judge and the agent model share a vendor; any self-preference applies equally to both sides, so it does not affect the parity comparison. The task default stays the upstream panel. The grader carries one compatibility change in `frontier_finance/judges.py` for these newer judges, which the pinned upstream commit predates: no `temperature` for Claude Haiku 5+ and GPT-6+, which reject it, and `LOW` thinking when a Gemini 3 Flash model rejects `MINIMAL`. Prompts, batching, parsing and voting are unchanged, and the upstream panel is sent the same requests as before. Both sides install the grader from the same fork commit.
 
@@ -144,7 +144,7 @@ Reproduction (keys come from the environment):
 python harbor_parity/run_claude_code.py run -d <adapters>/datasets/frontier-finance-parity -o runs/original1 \
     -m claude-haiku-5-5 --claude-code-version 2.1.330 -n 8 --backend daytona
 python harbor_parity/run_claude_code.py collect runs/original1 --summaries runs/original1/system_summaries.json
-cat <adapters>/datasets/frontier-finance-parity/*/tests/rubrics.jsonl > parity_rubrics.jsonl   # once
+cat <adapters>/datasets/frontier-finance-parity/*/tests/rubrics.jsonl > parity_rubrics.jsonl   # the rubrics of the queries that ran
 uv run --frozen --extra all frontier-finance-grader --config harbor_parity/eval.parity.yaml \
     --responses runs/original1/system_summaries.json --output-dir runs/original1/grades
 python harbor_parity/run_claude_code.py score runs/original1/grades/per_item.json [<regrade>/per_item.json ...]

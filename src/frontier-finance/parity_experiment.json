@@ -7,7 +7,7 @@
     "adapted_benchmark_size": 220,
     "parity_benchmark_size": 11,
     "number_of_runs": 3,
-    "notes": "Parity on the 11-task subset (5%, stratified by use case, --split parity), agreed with the Harbor team. Both sides are graded by the same cheap judge panel (claude-haiku-5-5, gemini-3.8-flash, gpt-6-luna); scores are not comparable with the upstream leaderboard.",
+    "notes": "Parity on the 11-task subset (5%, stratified by use case, --split parity), agreed with the Harbor team. Both sides: Harbor 0.27.0 (latest release), claude-code 2.1.330 installed by Harbor's claude-code install step, model claude-haiku-5-5 (the model's canonical ID; it has no dated variant, and every request in the claude-code logs reports it), Harbor's claude-code flags and environment with host overrides unset, instruction.md unchanged on stdin, 3600 s agent limit and resources from task.toml, 8 concurrent trials, Daytona sandboxes, gateway https://app.ppapi.ai. Both sides are graded by the same fork grader commit e287476 (upstream 8b71342 plus a judge-compatibility change in judges.py) and the same cheap judge panel (claude-haiku-5-5, gemini-3.8-flash, gpt-6-luna) with upstream eval.example.yaml settings; scores are not comparable with the upstream leaderboard. Order: 5-query sanity run on both sides, counted toward run 1, then the rest of run 1, then runs 2 and 3.",
     "original_parity_repo": "https://github.com/Chaoqi31/frontier-finance/tree/harbor-parity",
     "adapter_pr": [
       "https://github.com/harbor-index/adapters/pull/16"
