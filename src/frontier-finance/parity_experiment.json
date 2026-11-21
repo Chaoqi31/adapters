@@ -12,7 +12,9 @@
     "adapter_pr": [
       "https://github.com/harbor-index/adapters/pull/16"
     ],
-    "dataset_pr": [],
+    "dataset_pr": [
+      "https://github.com/harbor-framework/harbor-datasets/pull/287"
+    ],
     "parity_pr": [
       "https://huggingface.co/datasets/harborframework/parity-experiments/discussions/291"
     ],
@@ -21,16 +23,16 @@
         "benchmark_name": "FrontierFinance",
         "metric": "macro_avg_qualification_rate_on_all_queries",
         "original": "0.3334 ± 0.0026",
-        "harbor": "0.3648 ± 0.0272",
+        "harbor": "0.3648 ± 0.0271",
         "original_runs": [
-          0.3355,
-          0.3365,
-          0.3281
+          0.335528,
+          0.336475,
+          0.328131
         ],
         "harbor_runs": [
-          0.4144,
-          0.3208,
-          0.3591
+          0.414361,
+          0.320846,
+          0.359063
         ]
       }
     ]
